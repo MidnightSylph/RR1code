@@ -1,0 +1,425 @@
+/*
+ * Файл: main.cpp
+ * Прізвище та група: [Ваше Прізвище], [Ваша Група]
+ * Номер варіанту: 13
+ * Дата складання: [Поточна дата]
+ * Назва роботи: Розрахункова робота (Семестр 1.2) - База даних на файлах
+ */
+
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <cstring>
+#include <iomanip>
+#include <windows.h> 
+
+using namespace std;
+
+// --- Структури даних ---
+struct Date {
+    int day, month, year;
+};
+
+struct Employee {
+    char fullName[100];
+    char position[100];
+    Date hireDate;
+    float salary;
+};
+
+struct Node {
+    Employee data;
+    Node* next;
+};
+
+// --- Глобальні змінні ---
+Node* head = nullptr;
+string currentDbFilename = "new_base.dat";
+string currentKey = "";
+bool isLicensed = false;
+string configFilename = "";
+
+// --- Допоміжні функції (Очищення пам'яті) ---
+void clearList() {
+    while (head != nullptr) {
+        Node* temp = head;
+        head = head->next;
+        delete temp;
+    }
+}
+
+// --- Логіка ліцензійного ключа ---
+bool validateLicense(const string& key) {
+    if (key.empty()) return false;
+    int sum = 0;
+    for (char c : key) sum += c;
+    return (sum % 10 == 1);
+}
+
+// --- Робота з конфігураційним файлом ---
+string getExeName(const char* argv0) {
+    string path(argv0);
+    size_t pos = path.find_last_of("/\\");
+    string filename = (pos == string::npos) ? path : path.substr(pos + 1);
+    size_t dotPos = filename.find_last_of(".");
+    if (dotPos != string::npos) {
+        filename = filename.substr(0, dotPos);
+    }
+    return filename + ".cfg";
+}
+
+void createDefaultConfig(const string& cfgName) {
+    ofstream out(cfgName);
+    if (out) {
+        out << "; Файл бази даних\n";
+        out << "DB = new_base.dat\n";
+        out << "; Ліцензійний ключ\n";
+        out << "KEY = \n";
+        out.close();
+        cout << "[УВАГА] Створено новий конфігураційний файл: " << cfgName << "\n";
+    }
+}
+
+void loadConfig(const string& cfgName) {
+    ifstream in(cfgName);
+    if (!in) {
+        createDefaultConfig(cfgName);
+        in.open(cfgName);
+    }
+    
+    string line;
+    while (getline(in, line)) {
+        if (line.empty() || line[0] == ';') continue;
+        
+        size_t eqPos = line.find('=');
+        if (eqPos != string::npos) {
+            string key = line.substr(0, eqPos);
+            string val = line.substr(eqPos + 1);
+            
+            // Trim spaces
+            key.erase(0, key.find_first_not_of(" \t"));
+            key.erase(key.find_last_not_of(" \t") + 1);
+            val.erase(0, val.find_first_not_of(" \t"));
+            val.erase(val.find_last_not_of(" \t") + 1);
+            
+            if (key == "DB") currentDbFilename = val;
+            else if (key == "KEY") currentKey = val;
+        }
+    }
+    in.close();
+    
+    isLicensed = validateLicense(currentKey);
+    if (!isLicensed) {
+        cout << "[ПОПЕРЕДЖЕННЯ] Ліцензійний ключ відсутній або некоректний!\n";
+        cout << "Спеціальні та додаткові функції заблоковано.\n\n";
+    }
+}
+
+void saveConfig() {
+    ofstream out(configFilename);
+    if (out) {
+        out << "; Файл бази даних\n";
+        out << "DB = " << currentDbFilename << "\n";
+        out << "; Ліцензійний ключ\n";
+        out << "KEY = " << currentKey << "\n";
+        out.close();
+        cout << "Конфігурацію збережено.\n";
+    }
+}
+
+// --- Робота з бінарним файлом бази даних ---
+void loadDB(const string& filename) {
+    clearList();
+    ifstream in(filename, ios::binary);
+    if (!in) {
+        cout << "[УВАГА] Файл БД " << filename << " не знайдено. Створюємо новий.\n";
+        ofstream out(filename, ios::binary);
+        out.close();
+        return;
+    }
+    
+    Employee emp;
+    Node* tail = nullptr;
+    while (in.read((char*)&emp, sizeof(Employee))) {
+        Node* newNode = new Node{emp, nullptr};
+        if (!head) {
+            head = newNode;
+            tail = newNode;
+        } else {
+            tail->next = newNode;
+            tail = newNode;
+        }
+    }
+    in.close();
+}
+
+void saveDB(const string& filename) {
+    ofstream out(filename, ios::binary);
+    if (!out) {
+        cout << "Помилка збереження файлу!\n";
+        return;
+    }
+    Node* temp = head;
+    while (temp) {
+        out.write((char*)&temp->data, sizeof(Employee));
+        temp = temp->next;
+    }
+    out.close();
+}
+
+// --- Основні функції ---
+void addRecord() {
+    Employee emp;
+    cout << "Введіть ПІБ: ";
+    cin.ignore();
+    cin.getline(emp.fullName, 100);
+    cout << "Введіть посаду: ";
+    cin.getline(emp.position, 100);
+    cout << "Введіть дату прийняття (ДД ММ РРРР через пробіл): ";
+    cin >> emp.hireDate.day >> emp.hireDate.month >> emp.hireDate.year;
+    cout << "Введіть заробітну плату: ";
+    cin >> emp.salary;
+    
+    Node* newNode = new Node{emp, nullptr};
+    if (!head) head = newNode;
+    else {
+        Node* temp = head;
+        while (temp->next) temp = temp->next;
+        temp->next = newNode;
+    }
+    saveDB(currentDbFilename);
+    cout << "Запис додано!\n";
+}
+
+void viewRecords() {
+    if (!head) {
+        cout << "База даних порожня.\n";
+        return;
+    }
+    Node* temp = head;
+    int index = 1;
+    cout << string(80, '-') << "\n";
+    cout << left << setw(5) << "№" << setw(30) << "ПІБ" << setw(20) << "Посада" 
+         << setw(15) << "Дата" << "З/П\n";
+    cout << string(80, '-') << "\n";
+    while (temp) {
+        cout << left << setw(5) << index++ 
+             << setw(30) << temp->data.fullName 
+             << setw(20) << temp->data.position 
+             << right << setfill('0') << setw(2) << temp->data.hireDate.day << "."
+             << setw(2) << temp->data.hireDate.month << "."
+             << setw(4) << temp->data.hireDate.year << setfill(' ') << left << "   "
+             << temp->data.salary << "\n";
+        temp = temp->next;
+    }
+    cout << string(80, '-') << "\n";
+}
+
+void deleteRecord() {
+    viewRecords();
+    if (!head) return;
+    int index;
+    cout << "Введіть номер запису для видалення: ";
+    cin >> index;
+    
+    if (index == 1) {
+        Node* toDelete = head;
+        head = head->next;
+        delete toDelete;
+        saveDB(currentDbFilename);
+        cout << "Запис видалено.\n";
+        return;
+    }
+    
+    Node* temp = head;
+    for (int i = 1; i < index - 1 && temp != nullptr; i++) {
+        temp = temp->next;
+    }
+    
+    if (!temp || !temp->next) {
+        cout << "Запис з таким номером не знайдено.\n";
+        return;
+    }
+    
+    Node* toDelete = temp->next;
+    temp->next = toDelete->next;
+    delete toDelete;
+    saveDB(currentDbFilename);
+    cout << "Запис видалено.\n";
+}
+
+void editRecord() {
+    viewRecords();
+    if (!head) return;
+    int index;
+    cout << "Введіть номер запису для редагування: ";
+    cin >> index;
+    
+    Node* temp = head;
+    for (int i = 1; i < index && temp != nullptr; i++) {
+        temp = temp->next;
+    }
+    
+    if (!temp) {
+        cout << "Запис з таким номером не знайдено.\n";
+        return;
+    }
+    
+    cout << "Нове ПІБ (старе: " << temp->data.fullName << "): ";
+    cin.ignore();
+    cin.getline(temp->data.fullName, 100);
+    cout << "Нова посада: ";
+    cin.getline(temp->data.position, 100);
+    cout << "Нова дата прийняття (ДД ММ РРРР): ";
+    cin >> temp->data.hireDate.day >> temp->data.hireDate.month >> temp->data.hireDate.year;
+    cout << "Нова з/п: ";
+    cin >> temp->data.salary;
+    
+    saveDB(currentDbFilename);
+    cout << "Запис змінено.\n";
+}
+
+// --- Спеціальні функції (Варіант 13) ---
+bool isAfter(Date d1, Date ref) {
+    if (d1.year > ref.year) return true;
+    if (d1.year == ref.year && d1.month > ref.month) return true;
+    if (d1.year == ref.year && d1.month == ref.month && d1.day > ref.day) return true;
+    return false;
+}
+
+void specialFunc1() {
+    if (!isLicensed) { cout << "Функція недоступна (немає ліцензії).\n"; return; }
+    
+    char searchPos[100];
+    Date refDate;
+    cout << "Введіть посаду: ";
+    cin.ignore();
+    cin.getline(searchPos, 100);
+    cout << "Введіть дату (ДД ММ РРРР): ";
+    cin >> refDate.day >> refDate.month >> refDate.year;
+    
+    bool found = false;
+    Node* temp = head;
+    while (temp) {
+        if (strcmp(temp->data.position, searchPos) == 0 && isAfter(temp->data.hireDate, refDate)) {
+            cout << temp->data.fullName << " | " << temp->data.salary << "\n";
+            found = true;
+        }
+        temp = temp->next;
+    }
+    if (!found) cout << "Співробітників не знайдено.\n";
+}
+
+void specialFunc2() {
+    if (!isLicensed) { cout << "Функція недоступна (немає ліцензії).\n"; return; }
+    
+    float minSalary;
+    cout << "Введіть мінімальну заробітну плату: ";
+    cin >> minSalary;
+    
+    bool found = false;
+    Node* temp = head;
+    while (temp) {
+        if (temp->data.salary > minSalary) {
+            cout << temp->data.fullName << " | " << temp->data.position << " | " << temp->data.salary << "\n";
+            found = true;
+        }
+        temp = temp->next;
+    }
+    if (!found) cout << "Співробітників не знайдено.\n";
+}
+
+// --- Додаткові функції ---
+void exportToCSV() {
+    if (!isLicensed) { cout << "Функція недоступна.\n"; return; }
+    string fname;
+    cout << "Введіть ім'я файлу (наприклад, base.csv): ";
+    cin >> fname;
+    ofstream out(fname);
+    if (!out) { cout << "Помилка!\n"; return; }
+    
+    Node* temp = head;
+    while (temp) {
+        out << temp->data.fullName << ";"
+            << temp->data.position << ";"
+            << temp->data.hireDate.day << "." << temp->data.hireDate.month << "." << temp->data.hireDate.year << ";"
+            << temp->data.salary << "\n";
+        temp = temp->next;
+    }
+    out.close();
+    cout << "Експортовано успішно!\n";
+}
+
+void saveAsDB() {
+    if (!isLicensed) { cout << "Функція недоступна.\n"; return; }
+    string fname;
+    cout << "Введіть нове ім'я файлу БД: ";
+    cin >> fname;
+    saveDB(fname);
+    cout << "Збережено як " << fname << "\n";
+}
+
+void editConfigMenu() {
+    if (!isLicensed) { cout << "Функція недоступна.\n"; return; }
+    cout << "1. Змінити ім'я файлу БД (Зараз: " << currentDbFilename << ")\n";
+    cout << "2. Змінити ліцензійний ключ (Зараз: " << currentKey << ")\n";
+    int choice;
+    cin >> choice;
+    if (choice == 1) {
+        cout << "Нове ім'я: ";
+        cin >> currentDbFilename;
+    } else if (choice == 2) {
+        cout << "Новий ключ: ";
+        cin >> currentKey;
+        isLicensed = validateLicense(currentKey);
+    }
+    saveConfig();
+    loadDB(currentDbFilename);
+}
+
+// --- Головне меню ---
+int main(int argc, char* argv[]) {
+    // Зміна кодування на Windows-1251 (стандартне для кирилиці у Visual Studio)
+    SetConsoleCP(1251);
+    SetConsoleOutputCP(1251);
+    
+    configFilename = getExeName(argv[0]);
+    loadConfig(configFilename);
+    loadDB(currentDbFilename);
+    
+    int choice;
+    do {
+        cout << "\n=== МЕНЮ ===\n";
+        cout << "1. Додати запис\n";
+        cout << "2. Видалити запис\n";
+        cout << "3. Переглянути записи\n";
+        cout << "4. Змінити запис\n";
+        cout << "--- Спеціальні функції ---\n";
+        cout << "5. Співробітники заданої посади після дати\n";
+        cout << "6. Співробітники з З/П вище заданої\n";
+        cout << "--- Додаткові функції ---\n";
+        cout << "7. Зберегти БД в інший файл\n";
+        cout << "8. Експорт у CSV\n";
+        cout << "9. Налаштування (редагування конфігу)\n";
+        cout << "0. Вихід\n";
+        cout << "Ваш вибір: ";
+        cin >> choice;
+        
+        switch (choice) {
+            case 1: addRecord(); break;
+            case 2: deleteRecord(); break;
+            case 3: viewRecords(); break;
+            case 4: editRecord(); break;
+            case 5: specialFunc1(); break;
+            case 6: specialFunc2(); break;
+            case 7: saveAsDB(); break;
+            case 8: exportToCSV(); break;
+            case 9: editConfigMenu(); break;
+            case 0: cout << "Вихід...\n"; break;
+            default: cout << "Невірний вибір.\n";
+        }
+    } while (choice != 0);
+    
+    clearList();
+    return 0;
+}
